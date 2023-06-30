@@ -24,7 +24,7 @@ import static picocli.CommandLine.Parameters.NULL_VALUE;
 public class VertxApplicationCommand implements Runnable {
 
   @Option(
-    names = {"--options", "--vertx-options"},
+    names = {"-options", "--options", "-vertx-options", "--vertx-options"},
     description = {
       "Specifies the Vert.x options.",
       "It should reference either a JSON file which represents the options OR be a JSON string."
@@ -34,7 +34,7 @@ public class VertxApplicationCommand implements Runnable {
   private String vertxOptions;
 
   @Option(
-    names = {"-c", "--clustered"},
+    names = {"-c", "-cluster", "--cluster"},
     description = {
       "If specified, then the Vert.x instance will form a cluster with any other Vert.x instances on the network."
     },
@@ -42,7 +42,7 @@ public class VertxApplicationCommand implements Runnable {
   )
   private Boolean clustered;
   @Option(
-    names = {"--cluster-port"},
+    names = {"-cluster-port", "--cluster-port"},
     description = {
       "Port to use for cluster communication.",
       "By default, a spare random port is chosen."
@@ -50,7 +50,7 @@ public class VertxApplicationCommand implements Runnable {
   )
   private Integer clusterPort;
   @Option(
-    names = {"--cluster-host"},
+    names = {"-cluster-host", "--cluster-host"},
     description = {
       "Host to bind to for cluster communication.",
       "If this is not specified, Vert.x will attempt to choose one from the available interfaces."
@@ -58,7 +58,7 @@ public class VertxApplicationCommand implements Runnable {
   )
   private String clusterHost;
   @Option(
-    names = {"--cluster-public-port"},
+    names = {"-cluster-public-port", "--cluster-public-port"},
     description = {
       "Public port to use for cluster communication.",
       "By default, Vert.x uses the same as the cluster port."
@@ -66,7 +66,7 @@ public class VertxApplicationCommand implements Runnable {
   )
   private Integer clusterPublicPort;
   @Option(
-    names = {"--cluster-public-host"},
+    names = {"-cluster-public-host", "--cluster-public-host"},
     description = {
       "Public host to bind to for cluster communication.",
       "By default, Vert.x uses the same as the cluster host."
@@ -75,7 +75,7 @@ public class VertxApplicationCommand implements Runnable {
   private String clusterPublicHost;
 
   @Option(
-    names = {"--deployment-options"},
+    names = {"-deployment-options", "--deployment-options"},
     description = {
       "Specifies the main verticle deployment options."
     }
@@ -83,7 +83,7 @@ public class VertxApplicationCommand implements Runnable {
   private String deploymentOptions;
 
   @Option(
-    names = {"-w", "--worker"},
+    names = {"-w", "-worker", "--worker"},
     description = {
       "If specified, then the main verticle is deployed as a worker verticle.",
       "Takes precedences over the value defined in deployment options.",
@@ -92,7 +92,7 @@ public class VertxApplicationCommand implements Runnable {
   )
   private Boolean worker;
   @Option(
-    names = {"--instances"},
+    names = {"-instances", "--instances"},
     description = {
       "Specifies how many instances of the verticle will be deployed.",
       "Takes precedences over the value defined in deployment options."
@@ -101,7 +101,7 @@ public class VertxApplicationCommand implements Runnable {
   private Integer instances;
 
   @Option(
-    names = {"--conf"},
+    names = {"-conf", "--conf"},
     description = {
       "Specifies configuration that should be provided to the verticle.",
       "It should reference either a JSON file which represents the options OR be a JSON string."
@@ -110,7 +110,7 @@ public class VertxApplicationCommand implements Runnable {
   private String config;
 
   @Option(
-    names = {"-h", "--help"},
+    names = {"-h", "-help", "--help"},
     usageHelp = true,
     description = {
       "Display a help message."
