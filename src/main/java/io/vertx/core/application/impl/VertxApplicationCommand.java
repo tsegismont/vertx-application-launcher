@@ -20,7 +20,7 @@ import picocli.CommandLine.Parameters;
 
 import static picocli.CommandLine.Parameters.NULL_VALUE;
 
-@Command(name = "VertxApplication", description = "Runs a Vert.x application.")
+@Command(name = "VertxApplication", description = "Runs a Vert.x application.", sortOptions=false)
 public class VertxApplicationCommand implements Runnable {
 
   @Option(
