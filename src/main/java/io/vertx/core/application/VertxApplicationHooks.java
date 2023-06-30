@@ -11,7 +11,9 @@
 
 package io.vertx.core.application;
 
-import io.vertx.core.AsyncResult;
+import io.vertx.core.Verticle;
+
+import java.util.function.Supplier;
 
 /**
  *
@@ -24,21 +26,32 @@ public interface VertxApplicationHooks {
   default void beforeStartingVertx(HookContext context) {
   }
 
-  default void afterStartingVertx(HookContext context, AsyncResult<Void> res) {
+  default void afterVertxStarted(HookContext context) {
+  }
+
+  default void afterFailureToStartVertx(HookContext context, Throwable t) {
+  }
+
+  default Supplier<Verticle> verticleSupplier() {
+    return null;
   }
 
   default void beforeDeployingVerticle(HookContext context) {
   }
 
-  default void afterDeployingVerticle(HookContext context, AsyncResult<Void> res) {
-    if (res.failed()) {
-      context.vertx().close();
-    }
+  default void afterVerticleDeployed(HookContext context) {
+  }
+
+  default void afterFailureToDeployVerticle(HookContext context, Throwable t) {
+    context.vertx().close();
   }
 
   default void beforeStoppingVertx(HookContext context) {
   }
 
-  default void afterStoppingVertx(HookContext context, AsyncResult<Void> res) {
+  default void afterVertxStopped(HookContext context) {
+  }
+
+  default void afterFailureToStopVertx(HookContext context, Throwable t) {
   }
 }

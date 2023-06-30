@@ -38,7 +38,7 @@ public class VertxApplication {
   }
 
   protected void launch(String[] args, VertxApplicationHooks hooks) {
-    VertxApplicationCommand command = new VertxApplicationCommand(log, Objects.requireNonNull(hooks));
+    VertxApplicationCommand command = new VertxApplicationCommand(this, Objects.requireNonNull(hooks), log);
     CommandLine commandLine = new CommandLine(command)
       .setOptionsCaseInsensitive(true);
     commandLine.execute(args);

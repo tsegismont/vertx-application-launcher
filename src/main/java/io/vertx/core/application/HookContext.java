@@ -18,12 +18,12 @@ import io.vertx.core.VertxOptions;
 public class HookContext {
 
   private final VertxOptions vertxOptions;
+  private final Vertx vertx;
   private final String mainVerticle;
   private final DeploymentOptions deploymentOptions;
-  private final Vertx vertx;
   private final String deploymentId;
 
-  private HookContext(VertxOptions vertxOptions, String mainVerticle, DeploymentOptions deploymentOptions, Vertx vertx, String deploymentId) {
+  private HookContext(VertxOptions vertxOptions, Vertx vertx, String mainVerticle, DeploymentOptions deploymentOptions, String deploymentId) {
     this.vertxOptions = vertxOptions;
     this.mainVerticle = mainVerticle;
     this.deploymentOptions = deploymentOptions;
@@ -31,8 +31,24 @@ public class HookContext {
     this.deploymentId = deploymentId;
   }
 
+  public static HookContext create(VertxOptions vertxOptions) {
+    return new HookContext(vertxOptions, null, null, null, null);
+  }
+
   public VertxOptions vertxOptions() {
     return vertxOptions;
+  }
+
+  public HookContext vertxStarted(Vertx vertx) {
+    return new HookContext(vertxOptions, vertx, null, null, null);
+  }
+
+  public Vertx vertx() {
+    return vertx;
+  }
+
+  public HookContext readyToDeploy(String mainVerticle, DeploymentOptions deploymentOptions) {
+    return new HookContext(vertxOptions, vertx, mainVerticle, deploymentOptions, null);
   }
 
   public String mainVerticle() {
@@ -43,8 +59,8 @@ public class HookContext {
     return deploymentOptions;
   }
 
-  public Vertx vertx() {
-    return vertx;
+  public HookContext verticleDeployed(String deploymentId) {
+    return new HookContext(vertxOptions, vertx, mainVerticle, deploymentOptions, deploymentId);
   }
 
   public String deploymentId() {

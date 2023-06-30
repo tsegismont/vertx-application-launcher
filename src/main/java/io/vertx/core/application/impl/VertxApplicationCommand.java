@@ -11,16 +11,27 @@
 
 package io.vertx.core.application.impl;
 
-import io.vertx.core.Vertx;
+import io.vertx.core.*;
+import io.vertx.core.application.HookContext;
+import io.vertx.core.application.VertxApplication;
 import io.vertx.core.application.VertxApplicationHooks;
+import io.vertx.core.eventbus.EventBusOptions;
+import io.vertx.core.impl.VertxBuilder;
+import io.vertx.core.impl.VertxInternal;
 import io.vertx.core.impl.logging.Logger;
+import io.vertx.core.json.JsonObject;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
+import java.io.IOException;
+import java.time.Duration;
+import java.util.function.Supplier;
+
+import static io.vertx.core.application.impl.Utils.*;
 import static picocli.CommandLine.Parameters.NULL_VALUE;
 
-@Command(name = "VertxApplication", description = "Runs a Vert.x application.", sortOptions=false)
+@Command(name = "VertxApplication", description = "Runs a Vert.x application.", sortOptions = false)
 public class VertxApplicationCommand implements Runnable {
 
   @Option(
@@ -127,17 +138,166 @@ public class VertxApplicationCommand implements Runnable {
   )
   private String mainVerticle;
 
-  private final Logger log;
+  private final VertxApplication vertxApplication;
   private final VertxApplicationHooks hooks;
+  private final Logger log;
 
-  private volatile Vertx vertx;
+  private volatile VertxInternal vertx;
+  private volatile HookContext hookContext;
 
-  public VertxApplicationCommand(Logger log, VertxApplicationHooks hooks) {
-    this.log = log;
+  public VertxApplicationCommand(VertxApplication vertxApplication, VertxApplicationHooks hooks, Logger log) {
+    this.vertxApplication = vertxApplication;
     this.hooks = hooks;
+    this.log = log;
   }
 
   @Override
   public void run() {
+    JsonObject optionsJson = readJsonFileOrString("options", vertxOptions);
+    VertxBuilder builder = optionsJson != null ? new VertxBuilder(optionsJson) : new VertxBuilder();
+
+    if (clustered == Boolean.TRUE) {
+      EventBusOptions eventBusOptions = builder.options().getEventBusOptions();
+      if (clusterHost != null) {
+        eventBusOptions.setHost(clusterHost);
+      }
+      if (clusterPort != null) {
+        eventBusOptions.setPort(clusterPort);
+      }
+      if (clusterPublicHost != null) {
+        eventBusOptions.setClusterPublicHost(clusterPublicHost);
+      }
+      if (clusterPublicPort != null) {
+        eventBusOptions.setClusterPublicPort(clusterPublicPort);
+      }
+    }
+
+    hookContext = HookContext.create(builder.options());
+    hooks.beforeStartingVertx(hookContext);
+
+    builder.init();
+
+    AsyncResult<Vertx> arv;
+    try {
+      arv = await(() -> create(builder), Duration.ofMinutes(2));
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      log.error("Thread interrupted in startup");
+      hooks.afterFailureToStartVertx(hookContext, e);
+      return;
+    }
+    if (arv == null) {
+      log.error("Timed out in starting clustered Vert.x");
+      hooks.afterFailureToStartVertx(hookContext, null);
+      return;
+    }
+    if (arv.failed()) {
+      hooks.afterFailureToStartVertx(hookContext, arv.cause());
+      return;
+    }
+
+    vertx = (VertxInternal) arv.result();
+    hookContext = hookContext.vertxStarted(vertx);
+    hooks.afterVertxStarted(hookContext);
+
+    vertx.addCloseHook(this::beforeStoppingVertx);
+    Runtime.getRuntime().addShutdownHook(new Thread(this::shutdownHook));
+
+    JsonObject deploymentOptionsJson = readJsonFileOrString("deploymentOptions", deploymentOptions);
+    DeploymentOptions deploymentOptions = deploymentOptionsJson != null ? new DeploymentOptions(deploymentOptionsJson) : new DeploymentOptions();
+    if (worker == Boolean.TRUE) {
+      deploymentOptions.setWorker(true);
+    }
+    if (instances != null) {
+      deploymentOptions.setInstances(instances);
+    }
+    JsonObject conf = readJsonFileOrString("conf", config);
+    if (conf != null) {
+      deploymentOptions.setConfig(conf);
+    }
+    Supplier<Verticle> verticleSupplier = hooks.verticleSupplier();
+    if (verticleSupplier == null) {
+      if (mainVerticle == null) {
+        try {
+          mainVerticle = mainVerticleFromManifest(vertxApplication.getClass());
+        } catch (IOException e) {
+          throw new RuntimeException(e);
+        }
+      }
+      if (mainVerticle == null) {
+        log.error("If the <mainVerticle> parameter is not provided, the 'Main-Verticle' manifest attribute must be provided.");
+        return;
+      }
+    }
+
+    hookContext = hookContext.readyToDeploy(mainVerticle, deploymentOptions);
+    hooks.beforeDeployingVerticle(hookContext);
+
+    deploy(deploymentOptions, verticleSupplier);
+  }
+
+  private void deploy(DeploymentOptions deploymentOptions, Supplier<Verticle> verticleSupplier) {
+    ClassLoader originalClassLoader = Thread.currentThread().getContextClassLoader();
+    try {
+      Thread.currentThread().setContextClassLoader(getClass().getClassLoader());
+      Future<String> deployFuture;
+      if (verticleSupplier != null) {
+        deployFuture = vertx.deployVerticle(verticleSupplier, deploymentOptions);
+      } else {
+        deployFuture = vertx.deployVerticle(mainVerticle, deploymentOptions);
+      }
+      deployFuture.onComplete(ar -> {
+        if (ar.succeeded()) {
+          hookContext = hookContext.verticleDeployed(ar.result());
+          hooks.afterVerticleDeployed(hookContext);
+        } else {
+          hooks.afterFailureToDeployVerticle(hookContext, ar.cause());
+        }
+      });
+    } finally {
+      Thread.currentThread().setContextClassLoader(originalClassLoader);
+    }
+  }
+
+  private Future<Vertx> create(VertxBuilder builder) {
+    final ClassLoader originalClassLoader = Thread.currentThread().getContextClassLoader();
+    try {
+      Thread.currentThread().setContextClassLoader(getClass().getClassLoader());
+      if (clustered == Boolean.TRUE) {
+        log.info("Starting clustering...");
+        return builder.clusteredVertx().onFailure(t -> {
+          log.error("Failed to form cluster", t);
+        });
+      } else {
+        return Future.succeededFuture(builder.vertx());
+      }
+    } catch (Exception e) {
+      log.error("Failed to create the Vert.x instance", e);
+      return Future.failedFuture(e);
+    } finally {
+      Thread.currentThread().setContextClassLoader(originalClassLoader);
+    }
+  }
+
+  private void beforeStoppingVertx(Promise<Void> promise) {
+    try {
+      hooks.beforeStoppingVertx(hookContext);
+      promise.complete();
+    } catch (Exception e) {
+      promise.fail(e);
+    }
+  }
+
+  private void shutdownHook() {
+    AsyncResult<Void> ar = awaitUninterruptedly(() -> vertx.close(), Duration.ofMinutes(2));
+    if (ar == null) {
+      log.error("Timed out waiting for Vert.x to be closed");
+      hooks.afterFailureToStopVertx(hookContext, null);
+    } else if (ar.failed()) {
+      log.error("Failure in stopping Vert.x", ar.cause());
+      hooks.afterFailureToStopVertx(hookContext, ar.cause());
+    } else {
+      hooks.afterVertxStopped(hookContext);
+    }
   }
 }
