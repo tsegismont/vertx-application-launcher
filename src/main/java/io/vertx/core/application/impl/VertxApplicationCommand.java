@@ -1,6 +1,7 @@
 package io.vertx.core.application.impl;
 
 import io.vertx.core.Vertx;
+import io.vertx.core.application.VertxApplicationHooks;
 import io.vertx.core.impl.logging.Logger;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -116,10 +117,13 @@ public class VertxApplicationCommand implements Runnable {
   private String mainVerticle;
 
   private final Logger log;
+  private final VertxApplicationHooks hooks;
+
   private volatile Vertx vertx;
 
-  public VertxApplicationCommand(Logger log) {
+  public VertxApplicationCommand(Logger log, VertxApplicationHooks hooks) {
     this.log = log;
+    this.hooks = hooks;
   }
 
   @Override

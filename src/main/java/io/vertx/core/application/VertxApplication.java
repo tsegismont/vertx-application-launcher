@@ -16,6 +16,8 @@ import io.vertx.core.impl.logging.Logger;
 import io.vertx.core.impl.logging.LoggerFactory;
 import picocli.CommandLine;
 
+import java.util.Objects;
+
 public class VertxApplication {
 
   private static final Logger log = LoggerFactory.getLogger(VertxApplication.class);
@@ -26,6 +28,16 @@ public class VertxApplication {
   }
 
   protected void launch(String[] args) {
-    new CommandLine(new VertxApplicationCommand(log)).execute(args);
+    VertxApplicationHooks hooks;
+    if (this instanceof VertxApplicationHooks) {
+      hooks = (VertxApplicationHooks) this;
+    } else {
+      hooks = VertxApplicationHooks.DEFAULT;
+    }
+    launch(args, hooks);
+  }
+
+  protected void launch(String[] args, VertxApplicationHooks hooks) {
+    new CommandLine(new VertxApplicationCommand(log, Objects.requireNonNull(hooks))).execute(args);
   }
 }
