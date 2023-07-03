@@ -45,6 +45,9 @@ public class VertxApplication {
     VertxApplicationCommand command = new VertxApplicationCommand(this, Objects.requireNonNull(hooks), log);
     CommandLine commandLine = new CommandLine(command)
       .setOptionsCaseInsensitive(true);
-    commandLine.execute(args);
+    int exitCode = commandLine.execute(args);
+    if (exitCode != 0) { // Don't exit if the verticle has been deployed
+      System.exit(exitCode);
+    }
   }
 }

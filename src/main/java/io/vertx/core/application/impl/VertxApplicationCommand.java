@@ -30,14 +30,17 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 
 import static io.vertx.core.application.impl.Utils.*;
 import static io.vertx.core.impl.launcher.commands.BareCommand.*;
+import static io.vertx.core.impl.launcher.commands.ExecUtils.VERTX_DEPLOYMENT_EXIT_CODE;
+import static io.vertx.core.impl.launcher.commands.ExecUtils.VERTX_INITIALIZATION_EXIT_CODE;
 import static picocli.CommandLine.Parameters.NULL_VALUE;
 
 @Command(name = "VertxApplication", description = "Runs a Vert.x application.", sortOptions = false)
-public class VertxApplicationCommand implements Runnable {
+public class VertxApplicationCommand implements Callable<Integer> {
 
   @Option(
     names = {"-options", "--options", "-vertx-options", "--vertx-options"},
@@ -157,7 +160,7 @@ public class VertxApplicationCommand implements Runnable {
   }
 
   @Override
-  public void run() {
+  public Integer call() {
     JsonObject optionsJson = readJsonFileOrString("options", vertxOptions);
     VertxBuilder builder = optionsJson != null ? new VertxBuilder(optionsJson) : new VertxBuilder();
     if (clustered == Boolean.TRUE) {
@@ -191,16 +194,16 @@ public class VertxApplicationCommand implements Runnable {
       Thread.currentThread().interrupt();
       log.error("Thread interrupted in startup");
       hooks.afterFailureToStartVertx(hookContext, e);
-      return;
+      return VERTX_INITIALIZATION_EXIT_CODE;
     }
     if (arv == null) {
       log.error("Timed out in starting clustered Vert.x");
       hooks.afterFailureToStartVertx(hookContext, null);
-      return;
+      return VERTX_INITIALIZATION_EXIT_CODE;
     }
     if (arv.failed()) {
       hooks.afterFailureToStartVertx(hookContext, arv.cause());
-      return;
+      return VERTX_INITIALIZATION_EXIT_CODE;
     }
 
     vertx = (VertxInternal) arv.result();
@@ -232,7 +235,7 @@ public class VertxApplicationCommand implements Runnable {
       String verticleName = computeVerticleName();
       if (verticleName == null) {
         log.error("If the <mainVerticle> parameter is not provided, the 'Main-Verticle' manifest attribute must be provided.");
-        return;
+        return VERTX_DEPLOYMENT_EXIT_CODE;
       }
       deployer = () -> vertx.deployVerticle(verticleName, deploymentOptions);
       hookContext = hookContext.readyToDeploy(verticleName, deploymentOptions);
@@ -242,7 +245,33 @@ public class VertxApplicationCommand implements Runnable {
     }
     hooks.beforeDeployingVerticle(hookContext);
 
-    deploy(deployer);
+    AsyncResult<String> ard;
+    String message = hookContext.deploymentOptions().isWorker() ? "deploying worker verticle" : "deploying verticle";
+    try {
+      ard = await(() -> deploy(deployer), Duration.ofMinutes(2));
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      log.error("Thread interrupted in " + message);
+      hooks.afterFailureToDeployVerticle(hookContext, e);
+      return VERTX_DEPLOYMENT_EXIT_CODE;
+    }
+    if (ard == null) {
+      log.error("Timed out in " + message);
+      hooks.afterFailureToDeployVerticle(hookContext, null);
+      return VERTX_DEPLOYMENT_EXIT_CODE;
+    }
+    if (ard.failed()) {
+      Throwable cause = ard.cause();
+      hooks.afterFailureToDeployVerticle(hookContext, cause);
+      log.error("Failed in " + message, cause);
+      return VERTX_DEPLOYMENT_EXIT_CODE;
+    }
+
+    log.info("Succeeded in " + message);
+    hookContext = hookContext.verticleDeployed(ard.result());
+    hooks.afterVerticleDeployed(hookContext);
+
+    return null;
   }
 
   private String computeVerticleName() {
@@ -262,23 +291,11 @@ public class VertxApplicationCommand implements Runnable {
     return verticleName;
   }
 
-  private void deploy(Supplier<Future<String>> deployer) {
+  private Future<String> deploy(Supplier<Future<String>> deployer) {
     ClassLoader originalClassLoader = Thread.currentThread().getContextClassLoader();
     try {
       Thread.currentThread().setContextClassLoader(getClass().getClassLoader());
-      Future<String> deployFuture = deployer.get();
-      deployFuture.onComplete(ar -> {
-        String message = hookContext.deploymentOptions().isWorker() ? "deploying worker verticle" : "deploying verticle";
-        if (ar.succeeded()) {
-          log.info("Succeeded in " + message);
-          hookContext = hookContext.verticleDeployed(ar.result());
-          hooks.afterVerticleDeployed(hookContext);
-        } else {
-          Throwable cause = ar.cause();
-          log.error("Failed in " + message, cause);
-          hooks.afterFailureToDeployVerticle(hookContext, cause);
-        }
-      });
+      return deployer.get();
     } finally {
       Thread.currentThread().setContextClassLoader(originalClassLoader);
     }
