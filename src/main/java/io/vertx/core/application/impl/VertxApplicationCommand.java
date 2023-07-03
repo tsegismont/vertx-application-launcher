@@ -26,6 +26,8 @@ import picocli.CommandLine.Parameters;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import static io.vertx.core.application.impl.Utils.*;
@@ -221,37 +223,48 @@ public class VertxApplicationCommand implements Runnable {
     if (conf != null) {
       deploymentOptions.setConfig(conf);
     }
+    configureFromSystemProperties(deploymentOptions, DEPLOYMENT_OPTIONS_PROP_PREFIX);
+    Supplier<Future<String>> deployer;
     Supplier<Verticle> verticleSupplier = hooks.verticleSupplier();
     if (verticleSupplier == null) {
-      if (mainVerticle == null) {
-        try {
-          mainVerticle = mainVerticleFromManifest(vertxApplication.getClass());
-        } catch (IOException e) {
-          throw new RuntimeException(e);
-        }
-      }
-      if (mainVerticle == null) {
+      String verticleName = computeVerticleName();
+      if (verticleName == null) {
         log.error("If the <mainVerticle> parameter is not provided, the 'Main-Verticle' manifest attribute must be provided.");
         return;
       }
+      deployer = () -> vertx.deployVerticle(verticleName, deploymentOptions);
+      hookContext = hookContext.readyToDeploy(verticleName, deploymentOptions);
+    } else {
+      deployer = () -> vertx.deployVerticle(verticleSupplier, deploymentOptions);
+      hookContext = hookContext.readyToDeploy(null, deploymentOptions);
     }
-    configureFromSystemProperties(deploymentOptions, DEPLOYMENT_OPTIONS_PROP_PREFIX);
-    hookContext = hookContext.readyToDeploy(mainVerticle, deploymentOptions);
     hooks.beforeDeployingVerticle(hookContext);
 
-    deploy(deploymentOptions, verticleSupplier);
+    deploy(deployer);
   }
 
-  private void deploy(DeploymentOptions deploymentOptions, Supplier<Verticle> verticleSupplier) {
+  private String computeVerticleName() {
+    Set<String> attributeNames = Set.of("Main-Verticle", "Default-Verticle-Factory");
+    Map<String, String> manifestAttributes;
+    try {
+      manifestAttributes = getAttributesFromManifest(vertxApplication.getClass(), attributeNames);
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+    String mainVerticleAttribute = manifestAttributes.get("Main-Verticle");
+    String defaultVerticleFactory = manifestAttributes.get("Default-Verticle-Factory");
+    String verticleName = mainVerticle != null ? mainVerticle : mainVerticleAttribute;
+    if (defaultVerticleFactory != null && verticleName != null && verticleName.indexOf(':') == -1) {
+      verticleName = defaultVerticleFactory + ":" + verticleName;
+    }
+    return verticleName;
+  }
+
+  private void deploy(Supplier<Future<String>> deployer) {
     ClassLoader originalClassLoader = Thread.currentThread().getContextClassLoader();
     try {
       Thread.currentThread().setContextClassLoader(getClass().getClassLoader());
-      Future<String> deployFuture;
-      if (verticleSupplier != null) {
-        deployFuture = vertx.deployVerticle(verticleSupplier, deploymentOptions);
-      } else {
-        deployFuture = vertx.deployVerticle(mainVerticle, deploymentOptions);
-      }
+      Future<String> deployFuture = deployer.get();
       deployFuture.onComplete(ar -> {
         if (ar.succeeded()) {
           hookContext = hookContext.verticleDeployed(ar.result());

@@ -25,14 +25,19 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.Enumeration;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
 
 import static io.vertx.core.http.impl.HttpClientConnection.log;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.stream.Collectors.toUnmodifiableMap;
 
 public class Utils {
 
@@ -88,7 +93,7 @@ public class Utils {
     }
   }
 
-  public static String mainVerticleFromManifest(Class<?> mainClass) throws IOException {
+  public static Map<String, String> getAttributesFromManifest(Class<?> mainClass, Set<String> attributeNames) throws IOException {
     Enumeration<URL> resources = Utils.class.getClassLoader().getResources("META-INF/MANIFEST.MF");
     while (resources.hasMoreElements()) {
       try (InputStream stream = resources.nextElement().openStream()) {
@@ -96,14 +101,11 @@ public class Utils {
         Attributes attributes = manifest.getMainAttributes();
         String mainClassName = attributes.getValue("Main-Class");
         if (mainClass.getName().equals(mainClassName)) {
-          String value = attributes.getValue("Main-Verticle");
-          if (value != null) {
-            return value;
-          }
+          return attributeNames.stream().collect(toUnmodifiableMap(Function.identity(), attributes::getValue));
         }
       }
     }
-    return null;
+    return Collections.emptyMap();
   }
 
   private Utils() {
