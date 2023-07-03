@@ -37,7 +37,8 @@ import java.util.jar.Manifest;
 
 import static io.vertx.core.http.impl.HttpClientConnection.log;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
-import static java.util.stream.Collectors.toUnmodifiableMap;
+import static java.util.stream.Collectors.collectingAndThen;
+import static java.util.stream.Collectors.toMap;
 
 public class Utils {
 
@@ -101,7 +102,7 @@ public class Utils {
         Attributes attributes = manifest.getMainAttributes();
         String mainClassName = attributes.getValue("Main-Class");
         if (mainClass.getName().equals(mainClassName)) {
-          return attributeNames.stream().collect(toUnmodifiableMap(Function.identity(), attributes::getValue));
+          return attributeNames.stream().collect(collectingAndThen(toMap(Function.identity(), attributes::getValue), Collections::unmodifiableMap));
         }
       }
     }

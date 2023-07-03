@@ -26,6 +26,8 @@ import picocli.CommandLine.Parameters;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -244,7 +246,7 @@ public class VertxApplicationCommand implements Runnable {
   }
 
   private String computeVerticleName() {
-    Set<String> attributeNames = Set.of("Main-Verticle", "Default-Verticle-Factory");
+    Set<String> attributeNames = new HashSet<>(Arrays.asList("Main-Verticle", "Default-Verticle-Factory"));
     Map<String, String> manifestAttributes;
     try {
       manifestAttributes = getAttributesFromManifest(vertxApplication.getClass(), attributeNames);
