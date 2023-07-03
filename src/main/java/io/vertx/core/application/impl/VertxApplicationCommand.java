@@ -268,11 +268,15 @@ public class VertxApplicationCommand implements Runnable {
       Thread.currentThread().setContextClassLoader(getClass().getClassLoader());
       Future<String> deployFuture = deployer.get();
       deployFuture.onComplete(ar -> {
+        String message = hookContext.deploymentOptions().isWorker() ? "deploying worker verticle" : "deploying verticle";
         if (ar.succeeded()) {
+          log.info("Succeeded in " + message);
           hookContext = hookContext.verticleDeployed(ar.result());
           hooks.afterVerticleDeployed(hookContext);
         } else {
-          hooks.afterFailureToDeployVerticle(hookContext, ar.cause());
+          Throwable cause = ar.cause();
+          log.error("Failed in " + message, cause);
+          hooks.afterFailureToDeployVerticle(hookContext, cause);
         }
       });
     } finally {
