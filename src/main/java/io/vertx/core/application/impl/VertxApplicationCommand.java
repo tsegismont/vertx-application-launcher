@@ -29,6 +29,7 @@ import java.time.Duration;
 import java.util.function.Supplier;
 
 import static io.vertx.core.application.impl.Utils.*;
+import static io.vertx.core.impl.launcher.commands.BareCommand.*;
 import static picocli.CommandLine.Parameters.NULL_VALUE;
 
 @Command(name = "VertxApplication", description = "Runs a Vert.x application.", sortOptions = false)
@@ -155,7 +156,6 @@ public class VertxApplicationCommand implements Runnable {
   public void run() {
     JsonObject optionsJson = readJsonFileOrString("options", vertxOptions);
     VertxBuilder builder = optionsJson != null ? new VertxBuilder(optionsJson) : new VertxBuilder();
-
     if (clustered == Boolean.TRUE) {
       EventBusOptions eventBusOptions = builder.options().getEventBusOptions();
       if (clusterHost != null) {
@@ -170,11 +170,14 @@ public class VertxApplicationCommand implements Runnable {
       if (clusterPublicPort != null) {
         eventBusOptions.setClusterPublicPort(clusterPublicPort);
       }
+      configureFromSystemProperties(eventBusOptions, VERTX_EVENTBUS_PROP_PREFIX);
     }
-
+    configureFromSystemProperties(builder.options(), VERTX_OPTIONS_PROP_PREFIX);
+    if (builder.options().getMetricsOptions() != null) {
+      configureFromSystemProperties(builder.options().getMetricsOptions(), METRICS_OPTIONS_PROP_PREFIX);
+    }
     hookContext = HookContext.create(builder.options());
     hooks.beforeStartingVertx(hookContext);
-
     builder.init();
 
     AsyncResult<Vertx> arv;
@@ -199,7 +202,6 @@ public class VertxApplicationCommand implements Runnable {
     vertx = (VertxInternal) arv.result();
     hookContext = hookContext.vertxStarted(vertx);
     hooks.afterVertxStarted(hookContext);
-
     vertx.addCloseHook(this::beforeStoppingVertx);
     Runtime.getRuntime().addShutdownHook(new Thread(this::shutdownHook));
 
@@ -233,7 +235,7 @@ public class VertxApplicationCommand implements Runnable {
         return;
       }
     }
-
+    configureFromSystemProperties(deploymentOptions, DEPLOYMENT_OPTIONS_PROP_PREFIX);
     hookContext = hookContext.readyToDeploy(mainVerticle, deploymentOptions);
     hooks.beforeDeployingVerticle(hookContext);
 
