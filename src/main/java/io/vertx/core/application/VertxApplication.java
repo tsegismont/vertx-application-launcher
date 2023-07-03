@@ -12,6 +12,8 @@
 package io.vertx.core.application;
 
 import io.vertx.core.application.impl.VertxApplicationCommand;
+import io.vertx.core.application.impl.VertxApplicationHooksAdapter;
+import io.vertx.core.impl.launcher.VertxLifecycleHooks;
 import io.vertx.core.impl.logging.Logger;
 import io.vertx.core.impl.logging.LoggerFactory;
 import picocli.CommandLine;
@@ -31,6 +33,8 @@ public class VertxApplication {
     VertxApplicationHooks hooks;
     if (this instanceof VertxApplicationHooks) {
       hooks = (VertxApplicationHooks) this;
+    } else if (this instanceof VertxLifecycleHooks) {
+      hooks = new VertxApplicationHooksAdapter((VertxLifecycleHooks) this);
     } else {
       hooks = VertxApplicationHooks.DEFAULT;
     }

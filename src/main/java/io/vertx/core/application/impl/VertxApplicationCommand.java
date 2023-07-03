@@ -212,6 +212,10 @@ public class VertxApplicationCommand implements Runnable {
       deploymentOptions.setInstances(instances);
     }
     JsonObject conf = readJsonFileOrString("conf", config);
+    if (hooks instanceof VertxApplicationHooksAdapter) {
+      VertxApplicationHooksAdapter adapter = (VertxApplicationHooksAdapter) hooks;
+      adapter.afterConfigParsed(conf);
+    }
     if (conf != null) {
       deploymentOptions.setConfig(conf);
     }
