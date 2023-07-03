@@ -15,28 +15,39 @@ import io.vertx.core.*;
 import io.vertx.core.application.HookContext;
 import io.vertx.core.application.VertxApplication;
 import io.vertx.core.application.VertxApplicationHooks;
+import io.vertx.core.buffer.Buffer;
 import io.vertx.core.eventbus.EventBusOptions;
 import io.vertx.core.impl.VertxBuilder;
 import io.vertx.core.impl.VertxInternal;
 import io.vertx.core.impl.logging.Logger;
+import io.vertx.core.json.DecodeException;
 import io.vertx.core.json.JsonObject;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.jar.Attributes;
+import java.util.jar.Manifest;
 
-import static io.vertx.core.application.impl.Utils.*;
 import static io.vertx.core.impl.launcher.commands.BareCommand.*;
 import static io.vertx.core.impl.launcher.commands.ExecUtils.VERTX_DEPLOYMENT_EXIT_CODE;
 import static io.vertx.core.impl.launcher.commands.ExecUtils.VERTX_INITIALIZATION_EXIT_CODE;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.stream.Collectors.collectingAndThen;
+import static java.util.stream.Collectors.toMap;
 import static picocli.CommandLine.Parameters.NULL_VALUE;
 
 @Command(name = "VertxApplication", description = "Runs a Vert.x application.", sortOptions = false)
@@ -189,7 +200,7 @@ public class VertxApplicationCommand implements Callable<Integer> {
 
     AsyncResult<Vertx> arv;
     try {
-      arv = await(() -> create(builder), Duration.ofMinutes(2));
+      arv = withTCCLAwait(() -> createVertx(builder), Duration.ofMinutes(2));
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       log.error("Thread interrupted in startup");
@@ -248,7 +259,7 @@ public class VertxApplicationCommand implements Callable<Integer> {
     AsyncResult<String> ard;
     String message = hookContext.deploymentOptions().isWorker() ? "deploying worker verticle" : "deploying verticle";
     try {
-      ard = await(() -> deploy(deployer), Duration.ofMinutes(2));
+      ard = withTCCLAwait(deployer, Duration.ofMinutes(2));
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       log.error("Thread interrupted in " + message);
@@ -275,10 +286,10 @@ public class VertxApplicationCommand implements Callable<Integer> {
   }
 
   private String computeVerticleName() {
-    Set<String> attributeNames = new HashSet<>(Arrays.asList("Main-Verticle", "Default-Verticle-Factory"));
+    List<String> attributeNames = Arrays.asList("Main-Verticle", "Default-Verticle-Factory");
     Map<String, String> manifestAttributes;
     try {
-      manifestAttributes = getAttributesFromManifest(vertxApplication.getClass(), attributeNames);
+      manifestAttributes = getAttributesFromManifest(attributeNames);
     } catch (IOException e) {
       throw new RuntimeException(e);
     }
@@ -291,34 +302,19 @@ public class VertxApplicationCommand implements Callable<Integer> {
     return verticleName;
   }
 
-  private Future<String> deploy(Supplier<Future<String>> deployer) {
-    ClassLoader originalClassLoader = Thread.currentThread().getContextClassLoader();
-    try {
-      Thread.currentThread().setContextClassLoader(getClass().getClassLoader());
-      return deployer.get();
-    } finally {
-      Thread.currentThread().setContextClassLoader(originalClassLoader);
-    }
-  }
-
-  private Future<Vertx> create(VertxBuilder builder) {
-    final ClassLoader originalClassLoader = Thread.currentThread().getContextClassLoader();
-    try {
-      Thread.currentThread().setContextClassLoader(getClass().getClassLoader());
-      if (clustered == Boolean.TRUE) {
-        log.info("Starting clustering...");
-        return builder.clusteredVertx().onFailure(t -> {
-          log.error("Failed to form cluster", t);
-        });
-      } else {
-        return Future.succeededFuture(builder.vertx());
+  private Map<String, String> getAttributesFromManifest(List<String> attributeNames) throws IOException {
+    Enumeration<URL> resources = getClass().getClassLoader().getResources("META-INF/MANIFEST.MF");
+    while (resources.hasMoreElements()) {
+      try (InputStream stream = resources.nextElement().openStream()) {
+        Manifest manifest = new Manifest(stream);
+        Attributes attributes = manifest.getMainAttributes();
+        String mainClassName = attributes.getValue("Main-Class");
+        if (vertxApplication.getClass().getName().equals(mainClassName)) {
+          return attributeNames.stream().collect(collectingAndThen(toMap(Function.identity(), attributes::getValue), Collections::unmodifiableMap));
+        }
       }
-    } catch (Exception e) {
-      log.error("Failed to create the Vert.x instance", e);
-      return Future.failedFuture(e);
-    } finally {
-      Thread.currentThread().setContextClassLoader(originalClassLoader);
     }
+    return Collections.emptyMap();
   }
 
   private void beforeStoppingVertx(Promise<Void> promise) {
@@ -330,16 +326,85 @@ public class VertxApplicationCommand implements Callable<Integer> {
     }
   }
 
+  private Future<Vertx> createVertx(VertxBuilder builder) {
+    try {
+      if (clustered == Boolean.TRUE) {
+        log.info("Starting clustering...");
+        return builder.clusteredVertx().onFailure(t -> {
+          log.error("Failed to form cluster", t);
+        });
+      } else {
+        return Future.succeededFuture(builder.vertx());
+      }
+    } catch (Exception e) {
+      log.error("Failed to create the Vert.x instance", e);
+      return Future.failedFuture(e);
+    }
+  }
+
   private void shutdownHook() {
-    AsyncResult<Void> ar = awaitUninterruptedly(() -> vertx.close(), Duration.ofMinutes(2));
-    if (ar == null) {
+    CountDownLatch latch = new CountDownLatch(1);
+    Future<Void> future = vertx.close().andThen(v -> latch.countDown());
+    long remaining = Duration.ofMinutes(2).toMillis();
+    long stop = System.currentTimeMillis() + remaining;
+    boolean stopped = false, interrupted = false;
+    while (true) {
+      try {
+        if (remaining >= 0) {
+          if (latch.await(remaining, MILLISECONDS)) {
+            stopped = true;
+          }
+        }
+        break;
+      } catch (InterruptedException e) {
+        interrupted = true;
+        remaining = stop - System.currentTimeMillis();
+      } finally {
+        if (interrupted) {
+          Thread.currentThread().interrupt();
+        }
+      }
+    }
+    if (!stopped) {
       log.error("Timed out waiting for Vert.x to be closed");
       hooks.afterFailureToStopVertx(hookContext, null);
-    } else if (ar.failed()) {
-      log.error("Failure in stopping Vert.x", ar.cause());
-      hooks.afterFailureToStopVertx(hookContext, ar.cause());
+    } else if (future.failed()) {
+      log.error("Failure in stopping Vert.x", future.cause());
+      hooks.afterFailureToStopVertx(hookContext, future.cause());
     } else {
       hooks.afterVertxStopped(hookContext);
     }
+  }
+
+  private static <T> AsyncResult<T> withTCCLAwait(Supplier<Future<T>> supplier, Duration duration) throws InterruptedException {
+    ClassLoader originalClassLoader = Thread.currentThread().getContextClassLoader();
+    try {
+      CountDownLatch latch = new CountDownLatch(1);
+      Future<T> future = supplier.get().andThen(v -> latch.countDown());
+      if (latch.await(duration.toMillis(), MILLISECONDS)) {
+        return future;
+      }
+      return null;
+    } finally {
+      Thread.currentThread().setContextClassLoader(originalClassLoader);
+    }
+  }
+
+  private JsonObject readJsonFileOrString(String optionName, String jsonFileOrString) {
+    if (jsonFileOrString == null) {
+      return null;
+    }
+    try {
+      Path path = Paths.get(jsonFileOrString);
+      byte[] bytes = Files.readAllBytes(path);
+      return new JsonObject(Buffer.buffer(bytes));
+    } catch (InvalidPathException | IOException | DecodeException ignored) {
+    }
+    try {
+      return new JsonObject(jsonFileOrString);
+    } catch (DecodeException ignored) {
+    }
+    log.warn("The " + optionName + " option does not point to an valid JSON file or is not a valid JSON object.");
+    return null;
   }
 }
