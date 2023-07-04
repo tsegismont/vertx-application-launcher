@@ -20,16 +20,21 @@ import picocli.CommandLine;
 
 import java.util.Objects;
 
+import static picocli.CommandLine.Help.Ansi;
+
 public class VertxApplication {
 
   private static final Logger log = LoggerFactory.getLogger(VertxApplication.class);
 
+  private VertxApplicationCommand command;
+
   public static void main(String[] args) {
     VertxApplication vertxApplication = new VertxApplication();
-    vertxApplication.launch(args);
+    int exitCode = vertxApplication.launch(args);
+    vertxApplication.processExitCode(exitCode);
   }
 
-  protected void launch(String[] args) {
+  public int launch(String[] args) {
     VertxApplicationHooks hooks;
     if (this instanceof VertxApplicationHooks) {
       hooks = (VertxApplicationHooks) this;
@@ -38,14 +43,21 @@ public class VertxApplication {
     } else {
       hooks = VertxApplicationHooks.DEFAULT;
     }
-    launch(args, hooks);
+    return launch(args, hooks);
   }
 
-  protected void launch(String[] args, VertxApplicationHooks hooks) {
-    VertxApplicationCommand command = new VertxApplicationCommand(this, Objects.requireNonNull(hooks), log);
+  public int launch(String[] args, VertxApplicationHooks hooks) {
+    command = new VertxApplicationCommand(this, Objects.requireNonNull(hooks), log);
     CommandLine commandLine = new CommandLine(command)
       .setOptionsCaseInsensitive(true);
     int exitCode = commandLine.execute(args);
+    if (exitCode != 0) { // Don't print usage if the verticle has been deployed
+      CommandLine.usage(command, System.out, Ansi.ON);
+    }
+    return exitCode;
+  }
+
+  public void processExitCode(int exitCode) {
     if (exitCode != 0) { // Don't exit if the verticle has been deployed
       System.exit(exitCode);
     }

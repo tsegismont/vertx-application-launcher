@@ -37,7 +37,6 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
-import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
@@ -46,8 +45,6 @@ import static io.vertx.core.impl.launcher.commands.BareCommand.*;
 import static io.vertx.core.impl.launcher.commands.ExecUtils.VERTX_DEPLOYMENT_EXIT_CODE;
 import static io.vertx.core.impl.launcher.commands.ExecUtils.VERTX_INITIALIZATION_EXIT_CODE;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
-import static java.util.stream.Collectors.collectingAndThen;
-import static java.util.stream.Collectors.toMap;
 import static picocli.CommandLine.Parameters.NULL_VALUE;
 
 @Command(name = "VertxApplication", description = "Runs a Vert.x application.", sortOptions = false)
@@ -310,7 +307,14 @@ public class VertxApplicationCommand implements Callable<Integer> {
         Attributes attributes = manifest.getMainAttributes();
         String mainClassName = attributes.getValue("Main-Class");
         if (vertxApplication.getClass().getName().equals(mainClassName)) {
-          return attributeNames.stream().collect(collectingAndThen(toMap(Function.identity(), attributes::getValue), Collections::unmodifiableMap));
+          Map<String, String> map = new HashMap<>();
+          for (String attributeName : attributeNames) {
+            String attributeValue = attributes.getValue(attributeName);
+            if (attributeValue != null) {
+              map.put(attributeName, attributeValue);
+            }
+          }
+          return Collections.unmodifiableMap(map);
         }
       }
     }
