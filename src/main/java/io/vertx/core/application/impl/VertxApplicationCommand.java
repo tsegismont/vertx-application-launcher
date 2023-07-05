@@ -14,38 +14,27 @@ package io.vertx.core.application.impl;
 import io.vertx.core.*;
 import io.vertx.core.application.VertxApplication;
 import io.vertx.core.application.VertxApplicationHooks;
-import io.vertx.core.buffer.Buffer;
 import io.vertx.core.eventbus.EventBusOptions;
 import io.vertx.core.impl.VertxBuilder;
 import io.vertx.core.impl.VertxInternal;
 import io.vertx.core.impl.logging.Logger;
-import io.vertx.core.json.DecodeException;
 import io.vertx.core.json.JsonObject;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.lang.reflect.Method;
-import java.net.URL;
-import java.nio.file.Files;
-import java.nio.file.InvalidPathException;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.Duration;
-import java.util.*;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
-import java.util.jar.Attributes;
-import java.util.jar.Manifest;
 
+import static io.vertx.core.application.impl.Utils.*;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static picocli.CommandLine.Parameters.NULL_VALUE;
 
 @Command(name = "VertxApplication", description = "Runs a Vert.x application.", sortOptions = false)
-public class VertxApplicationCommand implements Callable<Integer> {
+public class VertxApplicationCommand implements Runnable {
 
   private static final String VERTX_OPTIONS_PROP_PREFIX = "vertx.options.";
   private static final String VERTX_EVENTBUS_PROP_PREFIX = "vertx.eventBus.options.";
@@ -63,7 +52,8 @@ public class VertxApplicationCommand implements Callable<Integer> {
     },
     defaultValue = Option.NULL_VALUE
   )
-  private String vertxOptions;
+  @SuppressWarnings("unused")
+  private String vertxOptionsStr;
 
   @Option(
     names = {"-c", "-cluster", "--cluster"},
@@ -72,6 +62,7 @@ public class VertxApplicationCommand implements Callable<Integer> {
     },
     arity = "0"
   )
+  @SuppressWarnings("unused")
   private Boolean clustered;
   @Option(
     names = {"-cluster-port", "--cluster-port"},
@@ -80,6 +71,7 @@ public class VertxApplicationCommand implements Callable<Integer> {
       "By default, a spare random port is chosen."
     }
   )
+  @SuppressWarnings("unused")
   private Integer clusterPort;
   @Option(
     names = {"-cluster-host", "--cluster-host"},
@@ -88,6 +80,7 @@ public class VertxApplicationCommand implements Callable<Integer> {
       "If this is not specified, Vert.x will attempt to choose one from the available interfaces."
     }
   )
+  @SuppressWarnings("unused")
   private String clusterHost;
   @Option(
     names = {"-cluster-public-port", "--cluster-public-port"},
@@ -96,6 +89,7 @@ public class VertxApplicationCommand implements Callable<Integer> {
       "By default, Vert.x uses the same as the cluster port."
     }
   )
+  @SuppressWarnings("unused")
   private Integer clusterPublicPort;
   @Option(
     names = {"-cluster-public-host", "--cluster-public-host"},
@@ -104,6 +98,7 @@ public class VertxApplicationCommand implements Callable<Integer> {
       "By default, Vert.x uses the same as the cluster host."
     }
   )
+  @SuppressWarnings("unused")
   private String clusterPublicHost;
 
   @Option(
@@ -112,7 +107,8 @@ public class VertxApplicationCommand implements Callable<Integer> {
       "Specifies the main verticle deployment options."
     }
   )
-  private String deploymentOptions;
+  @SuppressWarnings("unused")
+  private String deploymentOptionsStr;
 
   @Option(
     names = {"-w", "-worker", "--worker"},
@@ -122,6 +118,7 @@ public class VertxApplicationCommand implements Callable<Integer> {
     },
     arity = "0"
   )
+  @SuppressWarnings("unused")
   private Boolean worker;
   @Option(
     names = {"-instances", "--instances"},
@@ -130,6 +127,7 @@ public class VertxApplicationCommand implements Callable<Integer> {
       "Takes precedences over the value defined in deployment options."
     }
   )
+  @SuppressWarnings("unused")
   private Integer instances;
 
   @Option(
@@ -139,7 +137,8 @@ public class VertxApplicationCommand implements Callable<Integer> {
       "It should reference either a JSON file which represents the options OR be a JSON string."
     }
   )
-  private String config;
+  @SuppressWarnings("unused")
+  private String configStr;
 
   @Option(
     names = {"-h", "-help", "--help"},
@@ -148,6 +147,7 @@ public class VertxApplicationCommand implements Callable<Integer> {
       "Display a help message."
     },
     arity = "0")
+  @SuppressWarnings("unused")
   private boolean helpRequested;
 
   @Parameters(
@@ -157,14 +157,15 @@ public class VertxApplicationCommand implements Callable<Integer> {
     },
     defaultValue = NULL_VALUE
   )
+  @SuppressWarnings("unused")
   private String mainVerticle;
 
   private final VertxApplication vertxApplication;
   private final VertxApplicationHooks hooks;
   private final Logger log;
+  private final HookContextImpl hookContext = new HookContextImpl();
 
   private volatile VertxInternal vertx;
-  private volatile HookContextImpl hookContext;
 
   public VertxApplicationCommand(VertxApplication vertxApplication, VertxApplicationHooks hooks, Logger log) {
     this.vertxApplication = vertxApplication;
@@ -173,11 +174,50 @@ public class VertxApplicationCommand implements Callable<Integer> {
   }
 
   @Override
-  public Integer call() {
-    JsonObject optionsJson = readJsonFileOrString("options", vertxOptions);
+  public void run() {
+    JsonObject optionsJson = readJsonFileOrString(log, "options", vertxOptionsStr);
     VertxBuilder builder = optionsJson != null ? new VertxBuilder(optionsJson) : new VertxBuilder();
+
+    processVertxOptions(builder.options());
+
+    hookContext.setVertxOptions(builder.options());
+    hooks.beforeStartingVertx(hookContext);
+    builder.init();
+    vertx = (VertxInternal) withTCCLAwait(() -> createVertx(builder), Duration.ofMinutes(2), "startup", VertxApplicationHooks::afterFailureToStartVertx, VERTX_INITIALIZATION_EXIT_CODE);
+    hookContext.setVertx(vertx);
+    hooks.afterVertxStarted(hookContext);
+
+    vertx.addCloseHook(this::beforeStoppingVertx);
+    Runtime.getRuntime().addShutdownHook(new Thread(new ShutdownHook(vertx, this::afterShutdownHookExecuted)));
+
+    DeploymentOptions deploymentOptions = createDeploymentOptions();
+    hookContext.setDeploymentOptions(deploymentOptions);
+
+    Supplier<Future<String>> deployer;
+    Supplier<Verticle> verticleSupplier = hooks.verticleSupplier();
+    if (verticleSupplier == null) {
+      String verticleName = computeVerticleName(vertxApplication.getClass(), mainVerticle);
+      if (verticleName == null) {
+        log.error("If the <mainVerticle> parameter is not provided, the 'Main-Verticle' manifest attribute must be provided.");
+        throw new CommandException(VERTX_DEPLOYMENT_EXIT_CODE);
+      }
+      deployer = () -> vertx.deployVerticle(verticleName, deploymentOptions);
+      hookContext.setMainVerticle(verticleName);
+    } else {
+      deployer = () -> vertx.deployVerticle(verticleSupplier, deploymentOptions);
+    }
+
+    hooks.beforeDeployingVerticle(hookContext);
+    String message = hookContext.deploymentOptions().isWorker() ? "deploying worker verticle" : "deploying verticle";
+    String deploymentId = withTCCLAwait(deployer, Duration.ofMinutes(2), message, VertxApplicationHooks::afterFailureToDeployVerticle, VERTX_DEPLOYMENT_EXIT_CODE);
+    log.info("Succeeded in " + message);
+    hookContext.setDeploymentId(deploymentId);
+    hooks.afterVerticleDeployed(hookContext);
+  }
+
+  private void processVertxOptions(VertxOptions vertxOptions) {
     if (clustered == Boolean.TRUE) {
-      EventBusOptions eventBusOptions = builder.options().getEventBusOptions();
+      EventBusOptions eventBusOptions = vertxOptions.getEventBusOptions();
       if (clusterHost != null) {
         eventBusOptions.setHost(clusterHost);
       }
@@ -192,40 +232,14 @@ public class VertxApplicationCommand implements Callable<Integer> {
       }
       configureFromSystemProperties(log, eventBusOptions, VERTX_EVENTBUS_PROP_PREFIX);
     }
-    configureFromSystemProperties(log, builder.options(), VERTX_OPTIONS_PROP_PREFIX);
-    if (builder.options().getMetricsOptions() != null) {
-      configureFromSystemProperties(log, builder.options().getMetricsOptions(), METRICS_OPTIONS_PROP_PREFIX);
+    configureFromSystemProperties(log, vertxOptions, VERTX_OPTIONS_PROP_PREFIX);
+    if (vertxOptions.getMetricsOptions() != null) {
+      configureFromSystemProperties(log, vertxOptions.getMetricsOptions(), METRICS_OPTIONS_PROP_PREFIX);
     }
-    hookContext = HookContextImpl.create(builder.options());
-    hooks.beforeStartingVertx(hookContext);
-    builder.init();
+  }
 
-    AsyncResult<Vertx> arv;
-    try {
-      arv = withTCCLAwait(() -> createVertx(builder), Duration.ofMinutes(2));
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      log.error("Thread interrupted in startup");
-      hooks.afterFailureToStartVertx(hookContext, e);
-      return VERTX_INITIALIZATION_EXIT_CODE;
-    }
-    if (arv == null) {
-      log.error("Timed out in starting clustered Vert.x");
-      hooks.afterFailureToStartVertx(hookContext, null);
-      return VERTX_INITIALIZATION_EXIT_CODE;
-    }
-    if (arv.failed()) {
-      hooks.afterFailureToStartVertx(hookContext, arv.cause());
-      return VERTX_INITIALIZATION_EXIT_CODE;
-    }
-
-    vertx = (VertxInternal) arv.result();
-    hookContext = hookContext.vertxStarted(vertx);
-    hooks.afterVertxStarted(hookContext);
-    vertx.addCloseHook(this::beforeStoppingVertx);
-    Runtime.getRuntime().addShutdownHook(new Thread(this::shutdownHook));
-
-    JsonObject deploymentOptionsJson = readJsonFileOrString("deploymentOptions", deploymentOptions);
+  private DeploymentOptions createDeploymentOptions() {
+    JsonObject deploymentOptionsJson = readJsonFileOrString(log, "deploymentOptions", deploymentOptionsStr);
     DeploymentOptions deploymentOptions = deploymentOptionsJson != null ? new DeploymentOptions(deploymentOptionsJson) : new DeploymentOptions();
     if (worker == Boolean.TRUE) {
       deploymentOptions.setWorker(true);
@@ -233,7 +247,7 @@ public class VertxApplicationCommand implements Callable<Integer> {
     if (instances != null) {
       deploymentOptions.setInstances(instances);
     }
-    JsonObject conf = readJsonFileOrString("conf", config);
+    JsonObject conf = readJsonFileOrString(log, "conf", configStr);
     if (conf == null) {
       conf = new JsonObject();
     }
@@ -243,97 +257,7 @@ public class VertxApplicationCommand implements Callable<Integer> {
     }
     deploymentOptions.setConfig(conf);
     configureFromSystemProperties(log, deploymentOptions, DEPLOYMENT_OPTIONS_PROP_PREFIX);
-    Supplier<Future<String>> deployer;
-    Supplier<Verticle> verticleSupplier = hooks.verticleSupplier();
-    if (verticleSupplier == null) {
-      String verticleName = computeVerticleName();
-      if (verticleName == null) {
-        log.error("If the <mainVerticle> parameter is not provided, the 'Main-Verticle' manifest attribute must be provided.");
-        return VERTX_DEPLOYMENT_EXIT_CODE;
-      }
-      deployer = () -> vertx.deployVerticle(verticleName, deploymentOptions);
-      hookContext = hookContext.readyToDeploy(verticleName, deploymentOptions);
-    } else {
-      deployer = () -> vertx.deployVerticle(verticleSupplier, deploymentOptions);
-      hookContext = hookContext.readyToDeploy(null, deploymentOptions);
-    }
-    hooks.beforeDeployingVerticle(hookContext);
-
-    AsyncResult<String> ard;
-    String message = hookContext.deploymentOptions().isWorker() ? "deploying worker verticle" : "deploying verticle";
-    try {
-      ard = withTCCLAwait(deployer, Duration.ofMinutes(2));
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      log.error("Thread interrupted in " + message);
-      hooks.afterFailureToDeployVerticle(hookContext, e);
-      return VERTX_DEPLOYMENT_EXIT_CODE;
-    }
-    if (ard == null) {
-      log.error("Timed out in " + message);
-      hooks.afterFailureToDeployVerticle(hookContext, null);
-      return VERTX_DEPLOYMENT_EXIT_CODE;
-    }
-    if (ard.failed()) {
-      Throwable cause = ard.cause();
-      hooks.afterFailureToDeployVerticle(hookContext, cause);
-      log.error("Failed in " + message, cause);
-      return VERTX_DEPLOYMENT_EXIT_CODE;
-    }
-
-    log.info("Succeeded in " + message);
-    hookContext = hookContext.verticleDeployed(ard.result());
-    hooks.afterVerticleDeployed(hookContext);
-
-    return null;
-  }
-
-  private String computeVerticleName() {
-    List<String> attributeNames = Arrays.asList("Main-Verticle", "Default-Verticle-Factory");
-    Map<String, String> manifestAttributes;
-    try {
-      manifestAttributes = getAttributesFromManifest(attributeNames);
-    } catch (IOException e) {
-      throw new RuntimeException(e);
-    }
-    String mainVerticleAttribute = manifestAttributes.get("Main-Verticle");
-    String defaultVerticleFactory = manifestAttributes.get("Default-Verticle-Factory");
-    String verticleName = mainVerticle != null ? mainVerticle : mainVerticleAttribute;
-    if (defaultVerticleFactory != null && verticleName != null && verticleName.indexOf(':') == -1) {
-      verticleName = defaultVerticleFactory + ":" + verticleName;
-    }
-    return verticleName;
-  }
-
-  private Map<String, String> getAttributesFromManifest(List<String> attributeNames) throws IOException {
-    Enumeration<URL> resources = getClass().getClassLoader().getResources("META-INF/MANIFEST.MF");
-    while (resources.hasMoreElements()) {
-      try (InputStream stream = resources.nextElement().openStream()) {
-        Manifest manifest = new Manifest(stream);
-        Attributes attributes = manifest.getMainAttributes();
-        String mainClassName = attributes.getValue("Main-Class");
-        if (vertxApplication.getClass().getName().equals(mainClassName)) {
-          Map<String, String> map = new HashMap<>();
-          for (String attributeName : attributeNames) {
-            String attributeValue = attributes.getValue(attributeName);
-            if (attributeValue != null) {
-              map.put(attributeName, attributeValue);
-            }
-          }
-          return Collections.unmodifiableMap(map);
-        }
-      }
-    }
-    return Collections.emptyMap();
-  }
-
-  private void beforeStoppingVertx(Promise<Void> promise) {
-    try {
-      hooks.beforeStoppingVertx(hookContext);
-      promise.complete();
-    } catch (Exception e) {
-      promise.fail(e);
-    }
+    return deploymentOptions;
   }
 
   private Future<Vertx> createVertx(VertxBuilder builder) {
@@ -352,131 +276,48 @@ public class VertxApplicationCommand implements Callable<Integer> {
     }
   }
 
-  private void shutdownHook() {
-    CountDownLatch latch = new CountDownLatch(1);
-    Future<Void> future = vertx.close().andThen(v -> latch.countDown());
-    long remaining = Duration.ofMinutes(2).toMillis();
-    long stop = System.currentTimeMillis() + remaining;
-    boolean stopped = false, interrupted = false;
-    while (true) {
-      try {
-        if (remaining >= 0) {
-          if (latch.await(remaining, MILLISECONDS)) {
-            stopped = true;
-          }
-        }
-        break;
-      } catch (InterruptedException e) {
-        interrupted = true;
-        remaining = stop - System.currentTimeMillis();
-      } finally {
-        if (interrupted) {
-          Thread.currentThread().interrupt();
-        }
-      }
-    }
-    if (!stopped) {
-      log.error("Timed out waiting for Vert.x to be closed");
-      hooks.afterFailureToStopVertx(hookContext, null);
-    } else if (future.failed()) {
-      log.error("Failure in stopping Vert.x", future.cause());
-      hooks.afterFailureToStopVertx(hookContext, future.cause());
-    } else {
-      hooks.afterVertxStopped(hookContext);
-    }
-  }
-
-  private static <T> AsyncResult<T> withTCCLAwait(Supplier<Future<T>> supplier, Duration duration) throws InterruptedException {
+  private <T> T withTCCLAwait(Supplier<Future<T>> supplier, Duration duration, String logMessage, FailureHook failureHook, int exitCode) {
     ClassLoader originalClassLoader = Thread.currentThread().getContextClassLoader();
     try {
-      CountDownLatch latch = new CountDownLatch(1);
-      Future<T> future = supplier.get().andThen(v -> latch.countDown());
-      if (latch.await(duration.toMillis(), MILLISECONDS)) {
-        return future;
-      }
-      return null;
+      CompletableFuture<T> future = supplier.get().toCompletionStage().toCompletableFuture();
+      return future.get(duration.toMillis(), MILLISECONDS);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      log.error("Thread interrupted in " + logMessage);
+      failureHook.invokeHook(hooks, hookContext, e);
+      throw new CommandException(exitCode);
+    } catch (ExecutionException e) {
+      Throwable cause = e.getCause();
+      failureHook.invokeHook(hooks, hookContext, cause);
+      log.error("Failed in " + logMessage, cause);
+      throw new CommandException(exitCode);
+    } catch (TimeoutException e) {
+      log.error("Timed out in " + logMessage);
+      failureHook.invokeHook(hooks, hookContext, null);
+      throw new CommandException(exitCode);
     } finally {
       Thread.currentThread().setContextClassLoader(originalClassLoader);
     }
   }
 
-  private JsonObject readJsonFileOrString(String optionName, String jsonFileOrString) {
-    if (jsonFileOrString == null) {
-      return null;
-    }
+  private void beforeStoppingVertx(Promise<Void> promise) {
     try {
-      Path path = Paths.get(jsonFileOrString);
-      byte[] bytes = Files.readAllBytes(path);
-      return new JsonObject(Buffer.buffer(bytes));
-    } catch (InvalidPathException | IOException | DecodeException ignored) {
-    }
-    try {
-      return new JsonObject(jsonFileOrString);
-    } catch (DecodeException ignored) {
-    }
-    log.warn("The " + optionName + " option does not point to an valid JSON file or is not a valid JSON object.");
-    return null;
-  }
-
-  private static void configureFromSystemProperties(Logger log, Object options, String prefix) {
-    Properties props = System.getProperties();
-    Enumeration<?> e = props.propertyNames();
-    while (e.hasMoreElements()) {
-      String propName = (String) e.nextElement();
-      String propVal = props.getProperty(propName);
-      if (propName.startsWith(prefix)) {
-        String fieldName = propName.substring(prefix.length());
-        Method setter = getSetter(fieldName, options.getClass());
-        if (setter == null) {
-          log.warn("No such property to configure on options: " + options.getClass().getName() + "." + fieldName);
-          continue;
-        }
-        Class<?> argType = setter.getParameterTypes()[0];
-        Object arg;
-        try {
-          if (argType.equals(String.class)) {
-            arg = propVal;
-          } else if (argType.equals(int.class)) {
-            arg = Integer.valueOf(propVal);
-          } else if (argType.equals(long.class)) {
-            arg = Long.valueOf(propVal);
-          } else if (argType.equals(boolean.class)) {
-            arg = Boolean.valueOf(propVal);
-          } else if (argType.isEnum()) {
-            arg = Enum.valueOf((Class<? extends Enum>) argType, propVal);
-          } else {
-            log.warn("Invalid type for setter: " + argType);
-            continue;
-          }
-        } catch (IllegalArgumentException e2) {
-          log.warn("Invalid argtype:" + argType + " on options: " + options.getClass().getName() + "." + fieldName);
-          continue;
-        }
-        try {
-          setter.invoke(options, arg);
-        } catch (Exception ex) {
-          throw new VertxException("Failed to invoke setter: " + setter, ex);
-        }
-      }
+      hooks.beforeStoppingVertx(hookContext);
+      promise.complete();
+    } catch (Exception e) {
+      promise.fail(e);
     }
   }
 
-  private static Method getSetter(String fieldName, Class<?> clazz) {
-    Method[] meths = clazz.getDeclaredMethods();
-    for (Method meth : meths) {
-      if (("set" + fieldName).equalsIgnoreCase(meth.getName())) {
-        return meth;
-      }
+  private void afterShutdownHookExecuted(AsyncResult<Void> ar) {
+    if (ar == null) {
+      log.error("Timed out waiting for Vert.x to be closed");
+      hooks.afterFailureToStopVertx(hookContext, null);
+    } else if (ar.failed()) {
+      log.error("Failure in stopping Vert.x", ar.cause());
+      hooks.afterFailureToStopVertx(hookContext, ar.cause());
+    } else {
+      hooks.afterVertxStopped(hookContext);
     }
-
-    // This set contains the overridden methods
-    meths = clazz.getMethods();
-    for (Method meth : meths) {
-      if (("set" + fieldName).equalsIgnoreCase(meth.getName())) {
-        return meth;
-      }
-    }
-
-    return null;
   }
 }

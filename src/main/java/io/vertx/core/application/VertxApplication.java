@@ -11,6 +11,7 @@
 
 package io.vertx.core.application;
 
+import io.vertx.core.application.impl.CommandException;
 import io.vertx.core.application.impl.VertxApplicationCommand;
 import io.vertx.core.application.impl.VertxApplicationHooksAdapter;
 import io.vertx.core.impl.launcher.VertxLifecycleHooks;
@@ -83,7 +84,8 @@ public class VertxApplication {
   public int launch(String[] args, VertxApplicationHooks hooks, boolean printUsageOnFailure) {
     VertxApplicationCommand command = new VertxApplicationCommand(this, Objects.requireNonNull(hooks), log);
     CommandLine commandLine = new CommandLine(command)
-      .setOptionsCaseInsensitive(true);
+      .setOptionsCaseInsensitive(true)
+      .setExitCodeExceptionMapper(CommandException.EXIT_CODE_EXCEPTION_MAPPER);
     int exitCode = commandLine.execute(args);
     if (exitCode != 0 && printUsageOnFailure) { // Don't print usage if the verticle has been deployed
       CommandLine.usage(command, System.out, Ansi.ON);

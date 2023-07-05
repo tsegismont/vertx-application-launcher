@@ -18,22 +18,15 @@ import io.vertx.core.application.HookContext;
 
 public class HookContextImpl implements HookContext {
 
-  private final VertxOptions vertxOptions;
-  private final Vertx vertx;
-  private final String mainVerticle;
-  private final DeploymentOptions deploymentOptions;
-  private final String deploymentId;
+  private VertxOptions vertxOptions;
+  private Vertx vertx;
+  private String mainVerticle;
+  private DeploymentOptions deploymentOptions;
+  private String deploymentId;
 
-  private HookContextImpl(VertxOptions vertxOptions, Vertx vertx, String mainVerticle, DeploymentOptions deploymentOptions, String deploymentId) {
+  public HookContextImpl setVertxOptions(VertxOptions vertxOptions) {
     this.vertxOptions = vertxOptions;
-    this.mainVerticle = mainVerticle;
-    this.deploymentOptions = deploymentOptions;
-    this.vertx = vertx;
-    this.deploymentId = deploymentId;
-  }
-
-  public static HookContextImpl create(VertxOptions vertxOptions) {
-    return new HookContextImpl(vertxOptions, null, null, null, null);
+    return this;
   }
 
   @Override
@@ -41,8 +34,9 @@ public class HookContextImpl implements HookContext {
     return vertxOptions;
   }
 
-  public HookContextImpl vertxStarted(Vertx vertx) {
-    return new HookContextImpl(vertxOptions, vertx, null, null, null);
+  public HookContextImpl setVertx(Vertx vertx) {
+    this.vertx = vertx;
+    return this;
   }
 
   @Override
@@ -50,8 +44,14 @@ public class HookContextImpl implements HookContext {
     return vertx;
   }
 
-  public HookContextImpl readyToDeploy(String mainVerticle, DeploymentOptions deploymentOptions) {
-    return new HookContextImpl(vertxOptions, vertx, mainVerticle, deploymentOptions, null);
+  public HookContextImpl setMainVerticle(String mainVerticle) {
+    this.mainVerticle = mainVerticle;
+    return this;
+  }
+
+  public HookContextImpl setDeploymentOptions(DeploymentOptions deploymentOptions) {
+    this.deploymentOptions = deploymentOptions;
+    return this;
   }
 
   @Override
@@ -64,8 +64,9 @@ public class HookContextImpl implements HookContext {
     return deploymentOptions;
   }
 
-  public HookContextImpl verticleDeployed(String deploymentId) {
-    return new HookContextImpl(vertxOptions, vertx, mainVerticle, deploymentOptions, deploymentId);
+  public HookContextImpl setDeploymentId(String deploymentId) {
+    this.deploymentId = deploymentId;
+    return this;
   }
 
   @Override
