@@ -17,8 +17,10 @@ import io.vertx.core.application.VertxApplication;
 import io.vertx.core.application.VertxApplicationHooks;
 import io.vertx.core.impl.launcher.commands.HttpTestVerticle;
 import io.vertx.core.json.JsonObject;
+import io.vertx.core.metrics.MetricsOptions;
 import io.vertx.test.fakecluster.FakeClusterManager;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.io.*;
@@ -29,7 +31,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
+import java.util.Random;
 import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static io.vertx.core.impl.launcher.commands.ExecUtils.VERTX_DEPLOYMENT_EXIT_CODE;
 import static java.lang.Boolean.FALSE;
@@ -38,12 +42,11 @@ import static java.nio.file.StandardCopyOption.COPY_ATTRIBUTES;
 import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
 import static org.awaitility.Awaitility.await;
 import static org.hamcrest.CoreMatchers.equalTo;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class VertxApplicationTest {
 
-  private MyHooks hooks;
+  private MyHooks hooks = new MyHooks();
   private Path manifest;
   private ByteArrayOutputStream out;
   private ByteArrayOutputStream err;
@@ -70,21 +73,15 @@ public class VertxApplicationTest {
   @Test
   public void testDeploymentOfJavaVerticle() {
     VertxApplication myVertxApplication = new VertxApplication();
-    hooks = new MyHooks();
     myVertxApplication.launch(new String[]{HttpTestVerticle.class.getName()}, hooks);
-    await("Server not started")
-      .atMost(Duration.ofSeconds(10))
-      .until(() -> getHttpCode(), equalTo(200));
+    assertServerStarted();
   }
 
   @Test
   public void testDeploymentOfJavaVerticleWithCluster() throws IOException {
     VertxApplication myVertxApplication = new VertxApplication();
-    hooks = new MyHooks();
     myVertxApplication.launch(new String[]{HttpTestVerticle.class.getName(), "-cluster"}, hooks);
-    await("Server not started")
-      .atMost(Duration.ofSeconds(10))
-      .until(() -> getHttpCode(), equalTo(200));
+    assertServerStarted();
     assertEquals(TRUE, getContent().getBoolean("clustered"));
   }
 
@@ -93,7 +90,6 @@ public class VertxApplicationTest {
     setManifest("META-INF/MANIFEST-No-Main-Verticle.MF");
     Integer exitCode = captureOutput(() -> {
       VertxApplication myVertxApplication = new VertxApplication();
-      hooks = new MyHooks();
       return myVertxApplication.launch(new String[0], hooks);
     });
     assertEquals(VERTX_DEPLOYMENT_EXIT_CODE, exitCode);
@@ -105,7 +101,6 @@ public class VertxApplicationTest {
     setManifest("META-INF/MANIFEST-Missing-Main-Verticle.MF");
     Integer exitCode = captureOutput(() -> {
       VertxApplication myVertxApplication = new VertxApplication();
-      hooks = new MyHooks();
       return myVertxApplication.launch(new String[0], hooks);
     });
     assertEquals(VERTX_DEPLOYMENT_EXIT_CODE, exitCode);
@@ -116,30 +111,77 @@ public class VertxApplicationTest {
   @Test
   public void testFatJarWithHTTPVerticle() throws Exception {
     setManifest("META-INF/MANIFEST-Http-Verticle.MF");
-    captureOutput(() -> {
-      VertxApplication myVertxApplication = new VertxApplication();
-      hooks = new MyHooks();
-      return myVertxApplication.launch(new String[0], hooks);
-    });
-    await("Server not started")
-      .atMost(Duration.ofSeconds(10))
-      .until(() -> getHttpCode(), equalTo(200));
+    VertxApplication myVertxApplication = new VertxApplication();
+    myVertxApplication.launch(new String[0], hooks);
+    assertServerStarted();
     assertEquals(FALSE, getContent().getBoolean("clustered"));
   }
 
   @Test
   public void testFatJarWithHTTPVerticleWithCluster() throws Exception {
     setManifest("META-INF/MANIFEST-Http-Verticle.MF");
-    captureOutput(() -> {
-      VertxApplication myVertxApplication = new VertxApplication();
-      hooks = new MyHooks();
-      return myVertxApplication.launch(new String[]{"-cluster"}, hooks);
-    });
-    await("Server not started")
-      .atMost(Duration.ofSeconds(10))
-      .until(() -> getHttpCode(), equalTo(200));
+    VertxApplication myVertxApplication = new VertxApplication();
+    myVertxApplication.launch(new String[]{"-cluster"}, hooks);
+    assertServerStarted();
     assertEquals(TRUE, getContent().getBoolean("clustered"));
   }
+
+  @Test
+  public void testWithConfProvidedInline() throws Exception {
+    setManifest("META-INF/MANIFEST-Http-Verticle.MF");
+    VertxApplication myVertxApplication = new VertxApplication();
+    long someNumber = new Random().nextLong();
+    myVertxApplication.launch(new String[]{"--conf={\"random\":" + someNumber + "}"}, hooks);
+    assertServerStarted();
+    assertEquals(someNumber, getContent().getJsonObject("conf").getLong("random"));
+  }
+
+  @Test
+  public void testWithBrokenConfProvidedInline() throws Exception {
+    setManifest("META-INF/MANIFEST-Http-Verticle.MF");
+    VertxApplication myVertxApplication = new VertxApplication();
+    // There is a missing curly brace in the json fragment.
+    // This is normal, as the test checks that the configuration is not read in this case.
+    myVertxApplication.launch(new String[]{"--conf={\"name\":\"vertx\""}, hooks);
+    assertServerStarted();
+    assertEquals("{}", getContent().getJsonObject("conf").toString().replaceAll("\\s", ""));
+  }
+
+  @Test
+  public void testWithConfProvidedAsFile() throws Exception {
+    setManifest("META-INF/MANIFEST-Http-Verticle.MF");
+    VertxApplication myVertxApplication = new VertxApplication();
+    URI resource = getClass().getClassLoader().getResource("verticle-conf.json").toURI();
+    assertEquals("file", resource.getScheme());
+    Path source = Paths.get(resource);
+    myVertxApplication.launch(new String[]{"--conf", source.toString()}, hooks);
+    assertServerStarted();
+    assertEquals("vertx", getContent().getJsonObject("conf").getString("name"));
+  }
+
+  @Test
+  @Disabled("until proper support for sysprops is added")
+  public void testMetricsEnabledFromCommandLine() throws Exception {
+    setManifest("META-INF/MANIFEST-Http-Verticle.MF");
+    VertxApplication myVertxApplication = new VertxApplication();
+    AtomicReference<MetricsOptions> metricsOptions = new AtomicReference<>();
+    hooks = new MyHooks() {
+      @Override
+      public void beforeStartingVertx(HookContext context) {
+        metricsOptions.set(context.vertxOptions().getMetricsOptions());
+      }
+    };
+    try {
+      System.setProperty("vertx.metrics.options.enabled", "true");
+      myVertxApplication.launch(new String[0], hooks);
+    } finally {
+      System.clearProperty("vertx.metrics.options.enabled");
+    }
+    assertServerStarted();
+    assertNotNull(metricsOptions.get());
+    assertTrue(metricsOptions.get().isEnabled());
+  }
+
 
   public static class MyHooks implements VertxApplicationHooks {
 
@@ -174,6 +216,12 @@ public class VertxApplicationTest {
       System.setOut(originalOut);
       System.setErr(originalErr);
     }
+  }
+
+  static void assertServerStarted() {
+    await("Server not started")
+      .atMost(Duration.ofSeconds(10))
+      .until(() -> getHttpCode(), equalTo(200));
   }
 
   static int getHttpCode() throws IOException {

@@ -23,13 +23,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
-import java.time.Duration;
 import java.util.function.Supplier;
 
 import static io.vertx.application.VertxApplicationTest.*;
 import static java.lang.Boolean.TRUE;
-import static org.awaitility.Awaitility.await;
-import static org.hamcrest.CoreMatchers.equalTo;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
@@ -55,9 +52,7 @@ public class VertxApplicationExtensibilityTest {
       }
     };
     myVertxApplication.launch(new String[0], hooks);
-    await("Server not started")
-      .atMost(Duration.ofSeconds(10))
-      .until(() -> getHttpCode(), equalTo(200));
+    assertServerStarted();
   }
 
   @Test
@@ -76,9 +71,7 @@ public class VertxApplicationExtensibilityTest {
       }
     };
     myVertxApplication.launch(new String[0], hooks);
-    await("Server not started")
-      .atMost(Duration.ofSeconds(10))
-      .until(() -> getHttpCode(), equalTo(200));
+    assertServerStarted();
     assertEquals(time, getContent().getJsonObject("conf").getLong("time"));
   }
 
@@ -98,9 +91,7 @@ public class VertxApplicationExtensibilityTest {
       }
     };
     myVertxApplication.launch(new String[]{"-conf={\"time\":345667}"}, hooks);
-    await("Server not started")
-      .atMost(Duration.ofSeconds(10))
-      .until(() -> getHttpCode(), equalTo(200));
+    assertServerStarted();
     assertEquals(time, getContent().getJsonObject("conf").getLong("time"));
   }
 
@@ -121,9 +112,7 @@ public class VertxApplicationExtensibilityTest {
       }
     };
     myVertxApplication.launch(new String[0], hooks);
-    await("Server not started")
-      .atMost(Duration.ofSeconds(10))
-      .until(() -> getHttpCode(), equalTo(200));
+    assertServerStarted();
     assertEquals(TRUE, getContent().getBoolean("metrics"));
   }
 
@@ -143,9 +132,7 @@ public class VertxApplicationExtensibilityTest {
       }
     };
     myVertxApplication.launch(new String[]{"-cluster"}, hooks);
-    await("Server not started")
-      .atMost(Duration.ofSeconds(10))
-      .until(() -> getHttpCode(), equalTo(200));
+    assertServerStarted();
     assertEquals(TRUE, getContent().getBoolean("clustered"));
     assertSame(clusterManager, ((VertxInternal) hooks.vertx).getClusterManager());
   }
