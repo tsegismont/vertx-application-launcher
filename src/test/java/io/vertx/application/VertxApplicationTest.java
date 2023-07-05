@@ -20,7 +20,6 @@ import io.vertx.core.json.JsonObject;
 import io.vertx.core.metrics.MetricsOptions;
 import io.vertx.test.fakecluster.FakeClusterManager;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.io.*;
@@ -166,7 +165,6 @@ public class VertxApplicationTest {
   }
 
   @Test
-  @Disabled("until proper support for sysprops is added")
   public void testMetricsEnabledFromCommandLine() throws Exception {
     setManifest("META-INF/MANIFEST-Http-Verticle.MF");
     VertxApplication myVertxApplication = new VertxApplication();

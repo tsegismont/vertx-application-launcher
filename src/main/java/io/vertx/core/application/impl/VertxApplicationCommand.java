@@ -28,6 +28,7 @@ import picocli.CommandLine.Parameters;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Method;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
@@ -41,14 +42,19 @@ import java.util.function.Supplier;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
 
-import static io.vertx.core.impl.launcher.commands.BareCommand.*;
-import static io.vertx.core.impl.launcher.commands.ExecUtils.VERTX_DEPLOYMENT_EXIT_CODE;
-import static io.vertx.core.impl.launcher.commands.ExecUtils.VERTX_INITIALIZATION_EXIT_CODE;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static picocli.CommandLine.Parameters.NULL_VALUE;
 
 @Command(name = "VertxApplication", description = "Runs a Vert.x application.", sortOptions = false)
 public class VertxApplicationCommand implements Callable<Integer> {
+
+  private static final String VERTX_OPTIONS_PROP_PREFIX = "vertx.options.";
+  private static final String VERTX_EVENTBUS_PROP_PREFIX = "vertx.eventBus.options.";
+  private static final String DEPLOYMENT_OPTIONS_PROP_PREFIX = "vertx.deployment.options.";
+  private static final String METRICS_OPTIONS_PROP_PREFIX = "vertx.metrics.options.";
+
+  private static final int VERTX_INITIALIZATION_EXIT_CODE = 11;
+  private static final int VERTX_DEPLOYMENT_EXIT_CODE = 15;
 
   @Option(
     names = {"-options", "--options", "-vertx-options", "--vertx-options"},
@@ -185,11 +191,11 @@ public class VertxApplicationCommand implements Callable<Integer> {
       if (clusterPublicPort != null) {
         eventBusOptions.setClusterPublicPort(clusterPublicPort);
       }
-      configureFromSystemProperties(eventBusOptions, VERTX_EVENTBUS_PROP_PREFIX);
+      configureFromSystemProperties(log, eventBusOptions, VERTX_EVENTBUS_PROP_PREFIX);
     }
-    configureFromSystemProperties(builder.options(), VERTX_OPTIONS_PROP_PREFIX);
+    configureFromSystemProperties(log, builder.options(), VERTX_OPTIONS_PROP_PREFIX);
     if (builder.options().getMetricsOptions() != null) {
-      configureFromSystemProperties(builder.options().getMetricsOptions(), METRICS_OPTIONS_PROP_PREFIX);
+      configureFromSystemProperties(log, builder.options().getMetricsOptions(), METRICS_OPTIONS_PROP_PREFIX);
     }
     hookContext = HookContext.create(builder.options());
     hooks.beforeStartingVertx(hookContext);
@@ -229,14 +235,15 @@ public class VertxApplicationCommand implements Callable<Integer> {
       deploymentOptions.setInstances(instances);
     }
     JsonObject conf = readJsonFileOrString("conf", config);
+    if (conf == null) {
+      conf = new JsonObject();
+    }
     if (hooks instanceof VertxApplicationHooksAdapter) {
       VertxApplicationHooksAdapter adapter = (VertxApplicationHooksAdapter) hooks;
       adapter.afterConfigParsed(conf);
     }
-    if (conf != null) {
-      deploymentOptions.setConfig(conf);
-    }
-    configureFromSystemProperties(deploymentOptions, DEPLOYMENT_OPTIONS_PROP_PREFIX);
+    deploymentOptions.setConfig(conf);
+    configureFromSystemProperties(log, deploymentOptions, DEPLOYMENT_OPTIONS_PROP_PREFIX);
     Supplier<Future<String>> deployer;
     Supplier<Verticle> verticleSupplier = hooks.verticleSupplier();
     if (verticleSupplier == null) {
@@ -409,6 +416,68 @@ public class VertxApplicationCommand implements Callable<Integer> {
     } catch (DecodeException ignored) {
     }
     log.warn("The " + optionName + " option does not point to an valid JSON file or is not a valid JSON object.");
+    return null;
+  }
+
+  private static void configureFromSystemProperties(Logger log, Object options, String prefix) {
+    Properties props = System.getProperties();
+    Enumeration<?> e = props.propertyNames();
+    while (e.hasMoreElements()) {
+      String propName = (String) e.nextElement();
+      String propVal = props.getProperty(propName);
+      if (propName.startsWith(prefix)) {
+        String fieldName = propName.substring(prefix.length());
+        Method setter = getSetter(fieldName, options.getClass());
+        if (setter == null) {
+          log.warn("No such property to configure on options: " + options.getClass().getName() + "." + fieldName);
+          continue;
+        }
+        Class<?> argType = setter.getParameterTypes()[0];
+        Object arg;
+        try {
+          if (argType.equals(String.class)) {
+            arg = propVal;
+          } else if (argType.equals(int.class)) {
+            arg = Integer.valueOf(propVal);
+          } else if (argType.equals(long.class)) {
+            arg = Long.valueOf(propVal);
+          } else if (argType.equals(boolean.class)) {
+            arg = Boolean.valueOf(propVal);
+          } else if (argType.isEnum()) {
+            arg = Enum.valueOf((Class<? extends Enum>) argType, propVal);
+          } else {
+            log.warn("Invalid type for setter: " + argType);
+            continue;
+          }
+        } catch (IllegalArgumentException e2) {
+          log.warn("Invalid argtype:" + argType + " on options: " + options.getClass().getName() + "." + fieldName);
+          continue;
+        }
+        try {
+          setter.invoke(options, arg);
+        } catch (Exception ex) {
+          throw new VertxException("Failed to invoke setter: " + setter, ex);
+        }
+      }
+    }
+  }
+
+  private static Method getSetter(String fieldName, Class<?> clazz) {
+    Method[] meths = clazz.getDeclaredMethods();
+    for (Method meth : meths) {
+      if (("set" + fieldName).equalsIgnoreCase(meth.getName())) {
+        return meth;
+      }
+    }
+
+    // This set contains the overridden methods
+    meths = clazz.getMethods();
+    for (Method meth : meths) {
+      if (("set" + fieldName).equalsIgnoreCase(meth.getName())) {
+        return meth;
+      }
+    }
+
     return null;
   }
 }
