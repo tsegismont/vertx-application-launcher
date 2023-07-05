@@ -12,7 +12,6 @@
 package io.vertx.core.application.impl;
 
 import io.vertx.core.*;
-import io.vertx.core.application.HookContext;
 import io.vertx.core.application.VertxApplication;
 import io.vertx.core.application.VertxApplicationHooks;
 import io.vertx.core.buffer.Buffer;
@@ -165,7 +164,7 @@ public class VertxApplicationCommand implements Callable<Integer> {
   private final Logger log;
 
   private volatile VertxInternal vertx;
-  private volatile HookContext hookContext;
+  private volatile HookContextImpl hookContext;
 
   public VertxApplicationCommand(VertxApplication vertxApplication, VertxApplicationHooks hooks, Logger log) {
     this.vertxApplication = vertxApplication;
@@ -197,7 +196,7 @@ public class VertxApplicationCommand implements Callable<Integer> {
     if (builder.options().getMetricsOptions() != null) {
       configureFromSystemProperties(log, builder.options().getMetricsOptions(), METRICS_OPTIONS_PROP_PREFIX);
     }
-    hookContext = HookContext.create(builder.options());
+    hookContext = HookContextImpl.create(builder.options());
     hooks.beforeStartingVertx(hookContext);
     builder.init();
 

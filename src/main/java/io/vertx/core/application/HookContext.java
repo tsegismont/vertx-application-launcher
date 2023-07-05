@@ -15,55 +15,35 @@ import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Vertx;
 import io.vertx.core.VertxOptions;
 
-public class HookContext {
+/**
+ * Exposes objects available at different stages of the {@link VertxApplication} launch process.
+ */
+public interface HookContext {
 
-  private final VertxOptions vertxOptions;
-  private final Vertx vertx;
-  private final String mainVerticle;
-  private final DeploymentOptions deploymentOptions;
-  private final String deploymentId;
+  /**
+   * The Vert.x options, which can be modified before Vert.x is started.
+   */
+  VertxOptions vertxOptions();
 
-  private HookContext(VertxOptions vertxOptions, Vertx vertx, String mainVerticle, DeploymentOptions deploymentOptions, String deploymentId) {
-    this.vertxOptions = vertxOptions;
-    this.mainVerticle = mainVerticle;
-    this.deploymentOptions = deploymentOptions;
-    this.vertx = vertx;
-    this.deploymentId = deploymentId;
-  }
+  /**
+   * The Vert.x instance, after it has started.
+   */
+  Vertx vertx();
 
-  public static HookContext create(VertxOptions vertxOptions) {
-    return new HookContext(vertxOptions, null, null, null, null);
-  }
+  /**
+   * The name of the verticle to deploy.
+   * <p>
+   * May be {@code null} if not provided on the command line or configured in the JAR's {@code META-INF/MANIFEST.MF} file.
+   */
+  String mainVerticle();
 
-  public VertxOptions vertxOptions() {
-    return vertxOptions;
-  }
+  /**
+   * The verticle deployment options, which can be modified before Vert.x is started.
+   */
+  DeploymentOptions deploymentOptions();
 
-  public HookContext vertxStarted(Vertx vertx) {
-    return new HookContext(vertxOptions, vertx, null, null, null);
-  }
-
-  public Vertx vertx() {
-    return vertx;
-  }
-
-  public HookContext readyToDeploy(String mainVerticle, DeploymentOptions deploymentOptions) {
-    return new HookContext(vertxOptions, vertx, mainVerticle, deploymentOptions, null);
-  }
-
-  public String mainVerticle() {
-    return mainVerticle;
-  }
-
-  public DeploymentOptions deploymentOptions() {
-    return deploymentOptions;
-  }
-
-  public HookContext verticleDeployed(String deploymentId) {
-    return new HookContext(vertxOptions, vertx, mainVerticle, deploymentOptions, deploymentId);
-  }
-
-  public String deploymentId() {
-    return deploymentId;
-  }
+  /**
+   * The deployment identifier, after the verticle has started.
+   */
+  String deploymentId();
 }
