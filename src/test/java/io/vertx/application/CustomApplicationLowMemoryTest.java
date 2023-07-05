@@ -15,11 +15,9 @@ import io.vertx.core.AbstractVerticle;
 import io.vertx.core.application.HookContext;
 import io.vertx.core.application.VertxApplication;
 import io.vertx.core.application.VertxApplicationHooks;
-import io.vertx.junit5.VertxExtension;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.io.File;
 import java.io.IOException;
@@ -33,7 +31,6 @@ import static java.lang.Boolean.TRUE;
 import static org.awaitility.Awaitility.await;
 import static org.hamcrest.CoreMatchers.equalTo;
 
-@ExtendWith(VertxExtension.class)
 public class CustomApplicationLowMemoryTest {
 
   private static final String MSG_HOOK = CustomApplicationLowMemoryTest.class.getSimpleName() + "-hook";
