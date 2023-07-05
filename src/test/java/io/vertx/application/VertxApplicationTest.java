@@ -33,6 +33,7 @@ import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.Random;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static io.vertx.core.impl.launcher.commands.ExecUtils.VERTX_DEPLOYMENT_EXIT_CODE;
@@ -57,7 +58,12 @@ public class VertxApplicationTest {
       Files.deleteIfExists(manifest);
     }
     if (hooks != null && hooks.vertx != null) {
-      hooks.vertx.close();
+      CompletableFuture<Void> future = hooks.vertx.close()
+        .toCompletionStage()
+        .toCompletableFuture();
+      await("Failure to close Vert.x")
+        .atMost(Duration.ofSeconds(10))
+        .until(() -> future.isDone());
     }
     FakeClusterManager.reset();
   }
