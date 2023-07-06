@@ -191,7 +191,6 @@ public class VertxApplicationCommand implements Runnable {
     Runtime.getRuntime().addShutdownHook(new Thread(new ShutdownHook(vertx, this::afterShutdownHookExecuted)));
 
     DeploymentOptions deploymentOptions = createDeploymentOptions();
-    hookContext.setDeploymentOptions(deploymentOptions);
 
     Supplier<Future<String>> deployer;
     Supplier<Verticle> verticleSupplier = hooks.verticleSupplier();
@@ -202,9 +201,10 @@ public class VertxApplicationCommand implements Runnable {
         throw new CommandException(VERTX_DEPLOYMENT_EXIT_CODE);
       }
       deployer = () -> vertx.deployVerticle(verticleName, deploymentOptions);
-      hookContext.setMainVerticle(verticleName);
+      hookContext.readyToDeploy(verticleName, deploymentOptions);
     } else {
       deployer = () -> vertx.deployVerticle(verticleSupplier, deploymentOptions);
+      hookContext.readyToDeploy(null, deploymentOptions);
     }
 
     hooks.beforeDeployingVerticle(hookContext);

@@ -24,53 +24,45 @@ public class HookContextImpl implements HookContext {
   private DeploymentOptions deploymentOptions;
   private String deploymentId;
 
-  public HookContextImpl setVertxOptions(VertxOptions vertxOptions) {
+  public synchronized void setVertxOptions(VertxOptions vertxOptions) {
     this.vertxOptions = vertxOptions;
-    return this;
   }
 
   @Override
-  public VertxOptions vertxOptions() {
+  public synchronized VertxOptions vertxOptions() {
     return vertxOptions;
   }
 
-  public HookContextImpl setVertx(Vertx vertx) {
+  public synchronized void setVertx(Vertx vertx) {
     this.vertx = vertx;
-    return this;
   }
 
   @Override
-  public Vertx vertx() {
+  public synchronized Vertx vertx() {
     return vertx;
   }
 
-  public HookContextImpl setMainVerticle(String mainVerticle) {
+  public synchronized void readyToDeploy(String mainVerticle, DeploymentOptions deploymentOptions) {
     this.mainVerticle = mainVerticle;
-    return this;
-  }
-
-  public HookContextImpl setDeploymentOptions(DeploymentOptions deploymentOptions) {
     this.deploymentOptions = deploymentOptions;
-    return this;
   }
 
   @Override
-  public String mainVerticle() {
+  public synchronized String mainVerticle() {
     return mainVerticle;
   }
 
   @Override
-  public DeploymentOptions deploymentOptions() {
+  public synchronized DeploymentOptions deploymentOptions() {
     return deploymentOptions;
   }
 
-  public HookContextImpl setDeploymentId(String deploymentId) {
+  public synchronized void setDeploymentId(String deploymentId) {
     this.deploymentId = deploymentId;
-    return this;
   }
 
   @Override
-  public String deploymentId() {
+  public synchronized String deploymentId() {
     return deploymentId;
   }
 }
